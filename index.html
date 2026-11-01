@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ElectroStock</title>
+    <meta name="description" content="Electronics inventory management app with AI chatbot." />
+    <meta property="og:title" content="ElectroStock" />
+    <meta property="og:description" content="Electronics inventory management app with AI chatbot." />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <meta name="theme-color" content="#0f172a" />
+    <script>
+      (function() {
+        var theme = localStorage.getItem('electrostock-theme') || 'modern';
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-primary: var(--primary);
+  --color-background-light: var(--bg-light);
+  --color-background-dark: var(--bg-dark);
+  --font-display: var(--font-display);
+}
+
+:root, :root[data-theme="modern"] {
+  --primary: #1e94f6; /* Modern Blue */
+  --bg-light: #f5f7f8;
+  --bg-dark: #101a22;
+  --font-display: "Inter", sans-serif;
+}
+
+:root[data-theme="retro"] {
+  --primary: #d97706; /* Amber */
+  --bg-light: #fef3c7; /* Warm retro yellow */
+  --bg-dark: #292524; /* Dark stone */
+  --font-display: "VT323", monospace;
+}
+
+:root[data-theme="neon"] {
+  --primary: #00ff9f; /* Bright cyan/green */
+  --bg-light: #170b29; /* Dark purple */
+  --bg-dark: #0a0412; /* Very dark purple */
+  --font-display: "Orbitron", sans-serif;
+}
+
+body {
+  font-family: var(--font-display);
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.responsive-barcode svg {
+  max-width: 100% !important;
+  height: auto !important;
+}

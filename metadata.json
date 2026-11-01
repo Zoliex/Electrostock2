@@ -1,0 +1,6 @@
+{
+  "name": "ElectroStock",
+  "description": "Electronics inventory management app with AI chatbot.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
