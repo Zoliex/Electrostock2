@@ -1,7 +1,30 @@
 import http from "http";
 import os from "os";
-import { WebSocketServer, WebSocket } from "ws";
+import * as wsPkg from "ws";
+import type { WebSocket as WebSocketType } from "ws";
 import express from "express";
+
+// Backward & bundle compatibility: support ws v7 (ws.Server) and ws v8+ (ws.WebSocketServer),
+// as well as CommonJS and ESM interop.
+const wsAny = wsPkg as any;
+const WebSocketServer = (
+  wsAny.WebSocketServer ||
+  wsAny.Server ||
+  wsAny.default?.WebSocketServer ||
+  wsAny.default?.Server
+);
+const WebSocket = (
+  wsAny.WebSocket ||
+  wsAny.default?.WebSocket ||
+  wsAny.default ||
+  wsAny
+) as unknown as {
+  OPEN: number;
+  CONNECTING: number;
+  CLOSING: number;
+  CLOSED: number;
+};
+type WebSocket = WebSocketType;
 
 export interface RemoteScanOrderItem {
   id: string;

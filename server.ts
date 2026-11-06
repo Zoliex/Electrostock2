@@ -380,8 +380,12 @@ async function startServer() {
   const httpServer = http.createServer(app);
   setupScannerWebSocket(app, httpServer, Number(PORT));
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    (typeof __filename !== "undefined" && __filename.includes("dist"));
+
+  // Vite middleware for development (only when not running production build)
+  if (!isProduction) {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
