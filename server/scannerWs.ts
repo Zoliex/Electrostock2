@@ -190,11 +190,19 @@ export function getLocalNetworkAddresses(): { ip: string; name: string; isTailsc
   return results.map(({ ip, name, isTailscale }) => ({ ip, name, isTailscale }));
 }
 
-export function setupScannerWebSocket(app: express.Application, server: http.Server, port: number) {
+export function setupScannerWebSocket(
+  app: express.Application,
+  serverOrServers: http.Server | (http.Server | any)[],
+  port: number,
+  httpsPort?: number
+) {
+  const servers = Array.isArray(serverOrServers) ? serverOrServers : [serverOrServers];
+
   // REST endpoint for network addresses (used to build QR code URL when PC is on localhost)
   app.get("/api/network-info", (_req, res) => {
     res.json({
       port,
+      httpsPort: httpsPort || (port + 1),
       hostname: os.hostname(),
       addresses: getLocalNetworkAddresses()
     });
@@ -243,19 +251,22 @@ export function setupScannerWebSocket(app: express.Application, server: http.Ser
     console.error("[WS-Scanner] WSS error:", err);
   });
 
-  server.on("upgrade", (req, socket, head) => {
-    try {
-      const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
-      if (url.pathname === "/ws-scanner") {
-        wss.handleUpgrade(req, socket, head, (ws) => {
-          wss.emit("connection", ws, req, url);
-        });
+  for (const srv of servers) {
+    if (!srv) continue;
+    srv.on("upgrade", (req: any, socket: any, head: any) => {
+      try {
+        const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
+        if (url.pathname === "/ws-scanner") {
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit("connection", ws, req, url);
+          });
+        }
+        // Note: Do not destroy socket for non-matching paths so Vite HMR upgrade requests continue normally
+      } catch (err) {
+        console.error("[WS-Scanner] Upgrade error:", err);
       }
-      // Note: Do not destroy socket for non-matching paths so Vite HMR upgrade requests continue normally
-    } catch (err) {
-      console.error("[WS-Scanner] Upgrade error:", err);
-    }
-  });
+    });
+  }
 
   wss.on("connection", (ws: WebSocket, _req: http.IncomingMessage, url: URL) => {
     const rawSession = (url.searchParams.get("session") || "DEFAULT").trim().toUpperCase();

@@ -475,6 +475,8 @@ export const LcscOrderImportModal: React.FC<LcscOrderImportModalProps> = ({
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [connectedPhonesCount, setConnectedPhonesCount] = useState<number>(0);
   const [networkAddresses, setNetworkAddresses] = useState<NetworkAddressInfo[]>([]);
+  const [serverHttpPort, setServerHttpPort] = useState<number>(3000);
+  const [serverHttpsPort, setServerHttpsPort] = useState<number>(3001);
   const [selectedHostOrigin, setSelectedHostOrigin] = useState<string>(() => window.location.origin);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -1050,11 +1052,16 @@ export const LcscOrderImportModal: React.FC<LcscOrderImportModalProps> = ({
       .then((data) => {
         if (data && Array.isArray(data.addresses)) {
           setNetworkAddresses(data.addresses);
+          const httpP = Number(data.port) || 3000;
+          const httpsP = Number(data.httpsPort) || httpP + 1;
+          setServerHttpPort(httpP);
+          setServerHttpsPort(httpsP);
+
           const isLocalhost =
             window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
           if (isLocalhost && data.addresses.length > 0) {
-            const portPart = window.location.port ? `:${window.location.port}` : `:${data.port || 3000}`;
-            setSelectedHostOrigin(`${window.location.protocol}//${data.addresses[0].ip}${portPart}`);
+            // Default to HTTPS on port 3001 so the mobile browser immediately unlocks camera stream!
+            setSelectedHostOrigin(`https://${data.addresses[0].ip}:${httpsP}`);
           } else {
             setSelectedHostOrigin(window.location.origin);
           }
@@ -1861,12 +1868,17 @@ export const LcscOrderImportModal: React.FC<LcscOrderImportModalProps> = ({
                           {window.location.origin} (URL actuelle)
                         </option>
                         {networkAddresses.map((addr) => {
-                          const portPart = window.location.port ? `:${window.location.port}` : ":3000";
-                          const originUrl = `${window.location.protocol}//${addr.ip}${portPart}`;
+                          const httpsOrigin = `https://${addr.ip}:${serverHttpsPort}`;
+                          const httpOrigin = `http://${addr.ip}:${serverHttpPort}`;
                           return (
-                            <option key={addr.ip} value={originUrl}>
-                              {originUrl} ({addr.name}{addr.isTailscale ? " • Tailscale" : " • LAN Wi-Fi"})
-                            </option>
+                            <React.Fragment key={addr.ip}>
+                              <option value={httpsOrigin}>
+                                {httpsOrigin} (Caméra flux direct • HTTPS recommandé • {addr.name})
+                              </option>
+                              <option value={httpOrigin}>
+                                {httpOrigin} (HTTP standard • {addr.name})
+                              </option>
+                            </React.Fragment>
                           );
                         })}
                       </select>

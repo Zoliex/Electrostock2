@@ -1,5 +1,7 @@
 import express from "express";
 import http from "http";
+import https from "https";
+import selfsigned from "selfsigned";
 import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import dotenv from "dotenv";
@@ -46,6 +48,42 @@ function getSettings() {
   return currentDefaults;
 }
 
+async function getOrCreateSslCert() {
+  const CERT_FILE = path.join(process.cwd(), '.ssl_cert.json');
+  try {
+    if (fs.existsSync(CERT_FILE)) {
+      const data = JSON.parse(fs.readFileSync(CERT_FILE, 'utf-8'));
+      if (data.cert && data.private) {
+        return data;
+      }
+    }
+  } catch (e) {
+    console.warn("[SSL] Could not read existing cert file, regenerating:", e);
+  }
+
+  try {
+    const netAddrs = getLocalNetworkAddresses();
+    const altNames = [
+      { type: 2, value: 'localhost' },
+      { type: 7, ip: '127.0.0.1' },
+      ...netAddrs.map((a) => ({ type: 7, ip: a.ip }))
+    ];
+    const pems = await selfsigned.generate(
+      [{ name: 'commonName', value: 'ElectroStock Local' }],
+      { days: 365, extensions: [{ name: 'subjectAltName', altNames }] }
+    );
+    try {
+      fs.writeFileSync(CERT_FILE, JSON.stringify({ cert: pems.cert, private: pems.private }), 'utf-8');
+    } catch {
+      // Ignore write errors if filesystem is read-only
+    }
+    return pems;
+  } catch (err) {
+    console.error("[SSL] Failed to generate self-signed cert:", err);
+    return null;
+  }
+}
+
 async function startServer() {
   const app = express();
 
@@ -53,6 +91,7 @@ async function startServer() {
   app.set('trust proxy', true);
 
   const PORT = process.env.PORT || 3000;
+  const HTTPS_PORT = process.env.HTTPS_PORT || (Number(PORT) + 1);
 
   // Allow all devices on the local network (LAN / Tailscale) to access the server
   app.use((req, res, next) => {
@@ -378,7 +417,19 @@ async function startServer() {
   });
 
   const httpServer = http.createServer(app);
-  setupScannerWebSocket(app, httpServer, Number(PORT));
+  let httpsServer: https.Server | null = null;
+
+  try {
+    const sslData = await getOrCreateSslCert();
+    if (sslData) {
+      httpsServer = https.createServer({ key: sslData.private, cert: sslData.cert }, app);
+    }
+  } catch (err) {
+    console.warn("[SSL] HTTPS server could not be created:", err);
+  }
+
+  const activeServers = httpsServer ? [httpServer, httpsServer] : [httpServer];
+  setupScannerWebSocket(app, activeServers, Number(PORT), Number(HTTPS_PORT));
 
   const isProduction =
     process.env.NODE_ENV === "production" ||
@@ -408,13 +459,26 @@ async function startServer() {
   httpServer.listen(Number(PORT), "0.0.0.0", () => {
     const netAddrs = getLocalNetworkAddresses();
     console.log(`\n========================================================`);
-    console.log(`Server running on 0.0.0.0:${PORT} (accessible on all network interfaces)`);
+    console.log(`HTTP Server running on 0.0.0.0:${PORT} (accessible on all network interfaces)`);
     console.log(`  -> Local:   http://localhost:${PORT}`);
     for (const addr of netAddrs) {
       console.log(`  -> Network: http://${addr.ip}:${PORT} (${addr.name}${addr.isTailscale ? " - Tailscale" : ""})`);
     }
     console.log(`========================================================\n`);
   });
+
+  if (httpsServer) {
+    httpsServer.listen(Number(HTTPS_PORT), "0.0.0.0", () => {
+      const netAddrs = getLocalNetworkAddresses();
+      console.log(`\n========================================================`);
+      console.log(`HTTPS Server running on 0.0.0.0:${HTTPS_PORT} (Camera mobile déverrouillée)`);
+      console.log(`  -> Local:   https://localhost:${HTTPS_PORT}`);
+      for (const addr of netAddrs) {
+        console.log(`  -> Scanner Mobile: https://${addr.ip}:${HTTPS_PORT}/remote-scan (Flux direct sécurisé)`);
+      }
+      console.log(`========================================================\n`);
+    });
+  }
 }
 
 startServer();

@@ -22,7 +22,11 @@ import {
   Play,
   Package,
   Upload,
-  QrCode
+  QrCode,
+  Maximize2,
+  Minimize2,
+  ShieldAlert,
+  ShieldCheck
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -86,6 +90,7 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
       return "";
     }
   });
+  const [cameraSize, setCameraSize] = useState<"large" | "fullscreen" | "compact">("large");
   const [isCameraPaused, setIsCameraPaused] = useState(false);
   const [isStartingCamera, setIsStartingCamera] = useState(true);
   const [cameraError, setCameraError] = useState<string>("");
@@ -102,6 +107,17 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
   const onScanCodeRef = useRef(onScanCode);
   const activeRowIdRef = useRef(activeRowId);
 
+  const isSecure =
+    typeof window !== "undefined" &&
+    (window.isSecureContext ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1");
+
+  const httpsRedirectUrl =
+    typeof window !== "undefined"
+      ? `https://${window.location.hostname}:3001${window.location.pathname}${window.location.search}`
+      : "";
+
   useEffect(() => {
     onScanCodeRef.current = onScanCode;
   }, [onScanCode]);
@@ -110,14 +126,20 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
     activeRowIdRef.current = activeRowId;
   }, [activeRowId]);
 
-  // Step 1: Enumerate device cameras on mount before starting stream (fixes mobile camera race condition)
+  // Step 1: Initial camera check & enumeration on mount
   useEffect(() => {
     let mounted = true;
 
     if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setCameraError(
-        "Le flux caméra continu est bloqué sur une connexion HTTP locale non sécurisée. Utilisez le bouton Appareil Photo Natif ci-dessous ou ouvrez l'application via HTTPS / Tailscale."
-      );
+      if (!isSecure) {
+        setCameraError(
+          "Le flux vidéo direct est bloqué par le navigateur mobile sur une connexion HTTP locale. Utilisez le bouton ci-dessous pour basculer en HTTPS (recommandé) ou prenez une photo nette."
+        );
+      } else {
+        setCameraError(
+          "Votre appareil ne permet pas l'accès direct au flux caméra. Utilisez le bouton Appareil Photo Natif."
+        );
+      }
       setIsStartingCamera(false);
       setCamerasReady(false);
       return;
@@ -131,12 +153,9 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
           const saved = localStorage.getItem(PREFERRED_CAMERA_STORAGE_KEY);
           if (saved && devices.some((d) => d.id === saved)) {
             setSelectedCameraId(saved);
-          } else {
-            const backCam =
-              devices.find((d) => /back|rear|environment|arrière|0/i.test(d.label)) ||
-              devices[devices.length - 1];
-            setSelectedCameraId(backCam.id);
           }
+          // Do not force devices[0] if labels are empty before permission; leave selectedCameraId empty
+          // so startCamera can use the native { facingMode: "environment" } constraint!
         }
         setCamerasReady(true);
       })
@@ -150,9 +169,9 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [isSecure]);
 
-  // Step 2: Start / Restart camera cleanly after enumeration (STRICTLY 2D QR / DataMatrix ONLY!)
+  // Step 2: Start / Restart camera cleanly after enumeration with fallback cascade
   useEffect(() => {
     if (!camerasReady) return;
     let isCancelled = false;
@@ -194,60 +213,90 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
       if (isCancelled) return;
 
       try {
-        // Initialize Html5Qrcode strictly with 2D QR_CODE and DATA_MATRIX formats only!
-        // 1D barcodes (Code128/Code39) printed on the same LCSC bag label are completely ignored.
         const instance = new Html5Qrcode(readerElementId, {
           formatsToSupport: QR_ONLY_FORMATS,
           verbose: false
         });
         html5QrCodeRef.current = instance;
 
-        const cameraConfig = selectedCameraId
-          ? selectedCameraId
-          : { facingMode: "environment" };
+        const onQrSuccess = (decodedText: string) => {
+          const cleaned = decodedText.trim();
+          if (!cleaned) return;
 
-        const p = instance.start(
-          cameraConfig,
-          {
-            fps: 15
-          },
-          (decodedText) => {
-            const cleaned = decodedText.trim();
-            if (!cleaned) return;
-
-            // Extra safety check: in batch mode, reject plain 1D bag barcodes (X130138209)
-            // and only accept 2D QR payloads (which contain both pc:C... and pdi:...) or session links
-            const isSessionQr =
-              cleaned.includes("/remote-scan") || /[?&]session=/i.test(cleaned);
-            const parsed = parseLcscBagScan(cleaned);
-            if (!isSessionQr && parsed.type !== "lcsc_2d_qr") {
-              return;
-            }
-
-            const now = Date.now();
-            if (
-              lastScannedRef.current.code === cleaned &&
-              now - lastScannedRef.current.time < 1800
-            ) {
-              return;
-            }
-            lastScannedRef.current = { code: cleaned, time: now };
-
-            playScanFeedbackSound("success");
-            onScanCodeRef.current(cleaned, activeRowIdRef.current);
-          },
-          () => {
-            // Frame without QR code
+          const isSessionQr =
+            cleaned.includes("/remote-scan") || /[?&]session=/i.test(cleaned);
+          const parsed = parseLcscBagScan(cleaned);
+          if (!isSessionQr && parsed.type !== "lcsc_2d_qr") {
+            return;
           }
-        );
-        startPromiseRef.current = p.then(() => {}).catch(() => {});
-        await p;
+
+          const now = Date.now();
+          if (
+            lastScannedRef.current.code === cleaned &&
+            now - lastScannedRef.current.time < 1800
+          ) {
+            return;
+          }
+          lastScannedRef.current = { code: cleaned, time: now };
+
+          playScanFeedbackSound("success");
+          onScanCodeRef.current(cleaned, activeRowIdRef.current);
+        };
+
+        // Multi-tier fallback sequence:
+        // 1. User's explicitly chosen camera (if set)
+        // 2. Rear / back camera { facingMode: "environment" }
+        // 3. Any available camera { facingMode: "user" }
+        const configsToTry: any[] = [];
+        if (selectedCameraId) {
+          configsToTry.push(selectedCameraId);
+        }
+        configsToTry.push({ facingMode: "environment" });
+        configsToTry.push({ facingMode: "user" });
+
+        let startedSuccessfully = false;
+        let lastErr: any = null;
+
+        for (const config of configsToTry) {
+          if (isCancelled) return;
+          try {
+            const p = instance.start(
+              config,
+              {
+                fps: 15,
+                aspectRatio: 1.0
+              },
+              onQrSuccess,
+              () => {}
+            );
+            startPromiseRef.current = p.then(() => {}).catch(() => {});
+            await p;
+            startedSuccessfully = true;
+            break;
+          } catch (tryErr) {
+            lastErr = tryErr;
+            console.warn("[Camera] Config failed, trying next fallback:", tryErr);
+          }
+        }
+
+        if (!startedSuccessfully) {
+          throw lastErr || new Error("Impossible de démarrer la caméra");
+        }
+
+        // Camera is now running and permission granted! Refresh camera list with real human labels
+        Html5Qrcode.getCameras()
+          .then((devs) => {
+            if (!isCancelled && devs && devs.length > 0) {
+              setCameras(devs);
+            }
+          })
+          .catch(() => {});
       } catch (err: any) {
         if (!isCancelled) {
           console.error("Failed to start batch camera:", err);
           setCameraError(
             err?.message ||
-              "Impossible d'accéder au flux vidéo en direct. Utilisez le bouton Appareil Photo Natif ci-dessous."
+              "Impossible d'accéder au flux vidéo en direct. Utilisez le bouton Appareil Photo Natif ou le lien HTTPS ci-dessous."
           );
         }
       } finally {
@@ -449,6 +498,26 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
 
           <button
             type="button"
+            onClick={() =>
+              setCameraSize((prev) =>
+                prev === "large" ? "fullscreen" : prev === "fullscreen" ? "compact" : "large"
+              )
+            }
+            className="h-8 px-2 flex items-center gap-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 cursor-pointer"
+            title="Agrandir / réduire la vue caméra"
+          >
+            {cameraSize === "fullscreen" ? (
+              <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5 text-primary" />
+            )}
+            <span className="text-[11px] font-bold hidden xs:inline">
+              {cameraSize === "fullscreen" ? "Réduire" : cameraSize === "large" ? "Maxi" : "Agrandir"}
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={toggleTorch}
             className={`h-8 w-8 flex items-center justify-center rounded-xl border transition-colors cursor-pointer ${
               torchOn
@@ -482,39 +551,69 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
         </div>
       </div>
 
-      {/* Camera Viewport Area */}
-      <div className="relative w-full h-[32vh] min-h-[195px] max-h-[280px] bg-black overflow-hidden shrink-0 border-b border-slate-800">
+      {/* Enlarged Camera Viewport Area */}
+      <div
+        className={`relative w-full ${
+          cameraSize === "fullscreen"
+            ? "flex-1 h-full min-h-[460px]"
+            : cameraSize === "large"
+            ? "h-[54vh] min-h-[350px] max-h-[620px]"
+            : "h-[34vh] min-h-[220px] max-h-[320px]"
+        } bg-black overflow-hidden shrink-0 border-b border-slate-800 transition-[height] duration-200`}
+      >
         <style>{`
           #${readerElementId} { width: 100% !important; height: 100% !important; border: none !important; }
           #${readerElementId} video {
             object-fit: cover !important;
             width: 100% !important;
             height: 100% !important;
+            position: absolute !important;
+            top: 0;
+            left: 0;
+          }
+          #${readerElementId}__scan_region {
+            width: 100% !important;
+            height: 100% !important;
           }
           @keyframes batchLaser {
-            0%, 100% { transform: translateY(-50px); opacity: 0.3; }
-            50% { transform: translateY(50px); opacity: 1; }
+            0%, 100% { transform: translateY(-70px); opacity: 0.3; }
+            50% { transform: translateY(70px); opacity: 1; }
           }
         `}</style>
         <div id={readerElementId} className="w-full h-full" />
 
         {cameraError ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-slate-950/95 text-center z-20 gap-2.5">
-            <p className="text-xs text-slate-300 max-w-md">{cameraError}</p>
-            <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-slate-950/95 text-center z-20 gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <p className="text-xs text-slate-300 max-w-md font-medium leading-relaxed">{cameraError}</p>
+
+            <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-2 max-w-sm w-full">
+              {!isSecure && httpsRedirectUrl && (
+                <a
+                  href={httpsRedirectUrl}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Basculer en HTTPS (Flux Direct Caméra)</span>
+                </a>
+              )}
+
               <button
                 type="button"
                 onClick={() => nativeCameraInputRef.current?.click()}
                 disabled={isDecodingPhoto}
-                className="px-4 py-2.5 rounded-xl bg-emerald-500 text-slate-950 text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-lg cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-lg cursor-pointer"
               >
-                <Camera className="w-4 h-4" />
+                <Camera className="w-4 h-4 text-emerald-400" />
                 <span>
                   {isDecodingPhoto
                     ? "Décodage en cours..."
-                    : "Scanner avec l'Appareil Photo Natif"}
+                    : "Scanner avec Appareil Photo"}
                 </span>
               </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -522,9 +621,9 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
                   setIsCameraPaused(true);
                   setTimeout(() => setIsCameraPaused(false), 150);
                 }}
-                className="px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-xs font-bold cursor-pointer"
+                className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold cursor-pointer"
               >
-                Réessayer flux direct
+                Réessayer le flux direct
               </button>
             </div>
           </div>
@@ -541,14 +640,20 @@ export const MobileBatchBagScanner: React.FC<MobileBatchBagScannerProps> = ({
             </button>
           </div>
         ) : (
-          /* Square QR 2D Target Frame Overlay */
+          /* Enlarged Square QR 2D Target Frame Overlay */
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
-            <div className="w-44 h-44 sm:w-48 sm:h-48 relative rounded-2xl border border-white/25 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
-              <div className="absolute top-0 left-0 w-7 h-7 border-t-4 border-l-4 border-primary rounded-tl-xl" />
-              <div className="absolute top-0 right-0 w-7 h-7 border-t-4 border-r-4 border-primary rounded-tr-xl" />
-              <div className="absolute bottom-0 left-0 w-7 h-7 border-b-4 border-l-4 border-primary rounded-bl-xl" />
-              <div className="absolute bottom-0 right-0 w-7 h-7 border-b-4 border-r-4 border-primary rounded-br-xl" />
-              <div className="absolute top-1/2 left-3 right-3 h-0.5 bg-red-500 shadow-[0_0_8px_2px_rgba(239,68,68,0.8)] animate-[batchLaser_1.8s_ease-in-out_infinite]" />
+            <div
+              className={`${
+                cameraSize === "fullscreen" || cameraSize === "large"
+                  ? "w-60 h-60 sm:w-68 sm:h-68"
+                  : "w-44 h-44 sm:w-48 sm:h-48"
+              } relative rounded-2xl border border-white/25 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)] transition-[width,height] duration-200`}
+            >
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-primary rounded-tl-xl" />
+              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-primary rounded-tr-xl" />
+              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-primary rounded-bl-xl" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-primary rounded-br-xl" />
+              <div className="absolute top-1/2 left-3 right-3 h-0.5 bg-red-500 shadow-[0_0_10px_3px_rgba(239,68,68,0.85)] animate-[batchLaser_1.8s_ease-in-out_infinite]" />
             </div>
           </div>
         )}
