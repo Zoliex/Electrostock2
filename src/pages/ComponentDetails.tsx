@@ -50,6 +50,7 @@ export function ComponentDetails() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [criticalThreshold, setCriticalThreshold] = useState(10);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [lowResImageIds, setLowResImageIds] = useState<string[]>([]);
   const [printModalBarcode, setPrintModalBarcode] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState<'pdf' | 'fichero'>('pdf');
   const viewerRef = useRef<HTMLDivElement>(null);
@@ -63,25 +64,60 @@ export function ComponentDetails() {
 
   useEffect(() => {
     setActiveImageIndex(0);
+    setLowResImageIds([]);
   }, [id]);
 
-  const getFileData = (f: any): { id: string | null, title: string | null } => {
+  const getFileData = (
+    f: any
+  ): { id: string | null; title: string | null; width?: number | null; height?: number | null } => {
     if (!f) return { id: null, title: null };
     const fileObj = f.directus_files_id || f;
     if (typeof fileObj === 'object' && fileObj !== null) {
-      return { 
-        id: fileObj.id || null, 
-        title: fileObj.title || fileObj.filename_download || null 
+      return {
+        id: fileObj.id || null,
+        title: fileObj.title || fileObj.filename_download || null,
+        width: fileObj.width ?? null,
+        height: fileObj.height ?? null
       };
     }
     return { id: typeof fileObj === 'string' ? fileObj : null, title: null };
   };
 
-  const allImages = component ? [
-    { id: typeof component.main_image === 'object' ? (component.main_image as any).id : component.main_image, title: 'Main Image' },
-    ...((component as any).other_images?.map(getFileData) || []),
-    ...((component as any).components_files?.map(getFileData) || [])
-  ].filter((val, index, self) => val.id && self.findIndex(v => v.id === val.id) === index) : [];
+  const allImages = component
+    ? [
+        {
+          id:
+            typeof component.main_image === 'object' && component.main_image
+              ? (component.main_image as any).id
+              : component.main_image,
+          title: 'Main Image',
+          width: null,
+          height: null
+        },
+        ...((component as any).other_images?.map(getFileData) || []),
+        ...((component as any).components_files?.map(getFileData) || [])
+      ].filter((val, index, self) => {
+        if (!val.id) return false;
+        if (self.findIndex((v) => v.id === val.id) !== index) return false;
+        // Filter out additional images that are low-resolution thumbnail previews (< 250px)
+        if (index > 0) {
+          if (lowResImageIds.includes(val.id)) return false;
+          if (
+            (val.width && Number(val.width) > 0 && Number(val.width) < 250) ||
+            (val.height && Number(val.height) > 0 && Number(val.height) < 250)
+          ) {
+            return false;
+          }
+        }
+        return true;
+      })
+    : [];
+
+  useEffect(() => {
+    if (activeImageIndex >= allImages.length && allImages.length > 0) {
+      setActiveImageIndex(0);
+    }
+  }, [allImages.length, activeImageIndex]);
 
   const allFiles = component ? [
     ...((component as any).other_files || []),
@@ -338,7 +374,24 @@ export function ComponentDetails() {
               {/* Hidden list of all images for ViewerJS to pick up */}
               <div className="hidden">
                 {allImages.map((img, idx) => (
-                  <img key={idx} src={getFileUrl(img.id!)} alt={img.title || `${component.name} - ${idx}`} />
+                  <img
+                    key={img.id || idx}
+                    src={getFileUrl(img.id!)}
+                    alt={img.title || `${component.name} - ${idx}`}
+                    onLoad={(e) => {
+                      if (idx > 0 && img.id) {
+                        const { naturalWidth, naturalHeight } = e.currentTarget;
+                        if (
+                          (naturalWidth > 0 && naturalWidth < 250) ||
+                          (naturalHeight > 0 && naturalHeight < 250)
+                        ) {
+                          setLowResImageIds((prev) =>
+                            prev.includes(img.id!) ? prev : [...prev, img.id!]
+                          );
+                        }
+                      }
+                    }}
+                  />
                 ))}
               </div>
 
@@ -362,7 +415,7 @@ export function ComponentDetails() {
                     }
                   }}
                   alt={component.name}
-                  className="absolute inset-0 w-full h-full object-contain p-4 cursor-grab active:cursor-grabbing"
+                  className="absolute inset-0 w-full h-full object-contain cursor-grab active:cursor-grabbing"
                   src={allImages.length > 0 ? getFileUrl(allImages[activeImageIndex].id!) : "https://via.placeholder.com/800x400?text=No+Image"}
                   referrerPolicy="no-referrer"
                   onClick={() => openViewer(activeImageIndex)}
@@ -435,12 +488,108 @@ export function ComponentDetails() {
                 )}
               </div>
             </div>
+
+            {/* Existing Images Thumbnail Strip Directly Underneath the Displayed Image */}
+            {allImages.length > 0 && (
+              <div className="px-6 py-4 bg-slate-50/80 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3 overflow-x-auto">
+                {allImages.map((img, idx) => {
+                  const isSelected = activeImageIndex === idx;
+                  return (
+                    <button
+                      key={img.id || idx}
+                      type="button"
+                      onClick={() => setActiveImageIndex(idx)}
+                      onDoubleClick={() => openViewer(idx)}
+                      title={img.title || `Image ${idx + 1} (click to view, double-click to enlarge)`}
+                      className={`group/thumb relative shrink-0 w-20 h-20 rounded-2xl overflow-hidden border-2 transition-all cursor-pointer bg-white dark:bg-slate-900 p-0 ${
+                        isSelected
+                          ? "border-primary ring-2 ring-primary/25 shadow-md scale-[1.02]"
+                          : "border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100 hover:border-slate-400 dark:hover:border-slate-500"
+                      }`}
+                    >
+                      <img
+                        src={getFileUrl(img.id!)}
+                        alt={img.title || `${component.name} - ${idx + 1}`}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover block"
+                      />
+                      <span
+                        className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold shadow-sm ${
+                          isSelected
+                            ? "bg-primary text-white"
+                            : "bg-slate-900/75 text-white"
+                        }`}
+                      >
+                        {idx + 1}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="p-8">
               <h1 className="text-4xl font-black mb-6 tracking-tight text-slate-900 dark:text-white">
                 {component.name}
               </h1>
-              <div className="prose dark:prose-invert max-w-none text-slate-600 dark:text-slate-400 text-lg leading-relaxed space-y-4" data-color-mode="light">
-                <MDEditor.Markdown source={component.description || "*No description provided.*"} style={{ backgroundColor: 'transparent', color: 'inherit' }} />
+              <div className="prose dark:prose-invert max-w-none text-slate-600 dark:text-slate-300 text-base leading-relaxed space-y-4 [&_table]:w-full [&_table]:border-collapse [&_table]:rounded-xl [&_table]:overflow-hidden [&_th]:bg-slate-100 dark:[&_th]:bg-slate-800 [&_th]:text-slate-800 dark:[&_th]:text-slate-200 [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-left [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-wider [&_td]:px-4 [&_td]:py-2.5 [&_td]:border-t [&_td]:border-slate-200 dark:[&_td]:border-slate-800 [&_tr]:bg-transparent!">
+                <MDEditor.Markdown
+                  source={(() => {
+                    const raw = (component.description || "*No description provided.*").trim();
+                    const lines = raw.split(/\r?\n/);
+                    const cleaned: string[] = [];
+                    let inTechSpecs = false;
+                    let techSpecTableStarted = false;
+
+                    for (let i = 0; i < lines.length; i++) {
+                      const line = lines[i].trim();
+
+                      // Skip duplicate top-level heading that repeats the component name
+                      if (
+                        i === 0 &&
+                        /^#{1,3}\s+/.test(line) &&
+                        line.replace(/^#{1,3}\s+/, "").trim().toLowerCase() ===
+                          (component.name || "").trim().toLowerCase()
+                      ) {
+                        cleaned.push("### Component Overview");
+                        continue;
+                      }
+
+                      if (/^###\s+Technical Specifications/i.test(line)) {
+                        inTechSpecs = true;
+                        techSpecTableStarted = false;
+                        cleaned.push(lines[i]);
+                        continue;
+                      } else if (/^#{1,4}\s+/.test(line)) {
+                        inTechSpecs = false;
+                      }
+
+                      // Convert "- **Param**: Value" under Technical Specifications into a Markdown table
+                      if (inTechSpecs && /^-\s+\*\*([^*]+)\*\*\s*:\s*(.+)$/.test(line)) {
+                        const match = line.match(/^-\s+\*\*([^*]+)\*\*\s*:\s*(.+)$/);
+                        if (match) {
+                          if (!techSpecTableStarted) {
+                            cleaned.push("| Parameter | Specification |");
+                            cleaned.push("| :--- | :--- |");
+                            techSpecTableStarted = true;
+                          }
+                          cleaned.push(`| **${match[1].trim()}** | ${match[2].trim().replace(/、/g, ", ")} |`);
+                          continue;
+                        }
+                      }
+
+                      // Convert bare "**Key**: Value" lines into markdown list items so they don't collapse on one line
+                      if (/^\*\*[^*]+\*\*\s*:/.test(line)) {
+                        cleaned.push(`- ${line}`);
+                      } else {
+                        cleaned.push(lines[i]);
+                      }
+                    }
+
+                    return cleaned.join("\n").trim() || "*No description provided.*";
+                  })()}
+                  style={{ backgroundColor: "transparent", color: "inherit" }}
+                />
               </div>
             </div>
           </div>
@@ -522,7 +671,7 @@ export function ComponentDetails() {
           {/* Inventory Status Card */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
             <h3 className="text-lg font-bold mb-4">Inventory Status</h3>
-            <div className="bg-primary/5 dark:bg-primary/10 rounded-2xl p-4 mb-6 flex items-center justify-between border border-primary/20">
+            <div className="bg-primary/5 dark:bg-primary/10 rounded-2xl p-4 mb-4 flex items-center justify-between border border-primary/20">
               <div>
                 <p className="text-xs text-primary font-bold uppercase tracking-wider mb-1">Total Available</p>
                 <p className="text-4xl font-black text-primary">
@@ -531,6 +680,30 @@ export function ComponentDetails() {
               </div>
               <div className="size-12 bg-primary text-white rounded-xl flex items-center justify-center">
                 <Package className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Unit Price Paid & Total Stock Cost */}
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                  Unit Price Paid
+                </p>
+                <p className="text-base font-black font-mono text-slate-900 dark:text-white">
+                  {component.price !== null && component.price !== undefined && !isNaN(Number(component.price))
+                    ? `€${Number(component.price) < 1 && Number(component.price) > 0 ? Number(component.price).toFixed(4).replace(/0+$/, "").replace(/\.$/, ".00") : Number(component.price).toFixed(2)}`
+                    : "N/A"}
+                </p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1">
+                  Stock Cost
+                </p>
+                <p className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {component.price !== null && component.price !== undefined && !isNaN(Number(component.price))
+                    ? `€${(Number(component.price) * (Number(component.quantity_available) || 0)).toFixed(2)}`
+                    : "N/A"}
+                </p>
               </div>
             </div>
 
@@ -545,8 +718,8 @@ export function ComponentDetails() {
               <div className="flex items-start gap-3">
                 <Tag className="w-5 h-5 text-slate-400 shrink-0" />
                 <div>
-                  <p className="text-xs text-slate-500">Packet Reference</p>
-                  <p className="text-sm font-semibold">{component.packet_reference || "N/A"}</p>
+                  <p className="text-xs text-slate-500">Packet Reference (LCSC / MPN)</p>
+                  <p className="text-sm font-semibold font-mono">{component.packet_reference || "N/A"}</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">

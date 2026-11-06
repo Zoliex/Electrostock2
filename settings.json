@@ -1,0 +1,5 @@
+{
+  "directusUrl": "http://rpi4.orthrus-betelgeuse.ts.net:8055/",
+  "criticalStockThreshold": 2,
+  "enableAiSuggestions": true
+}

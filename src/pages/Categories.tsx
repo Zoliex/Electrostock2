@@ -98,19 +98,38 @@ export function Categories() {
   };
 
   const handleSave = async () => {
-    if (!formData.name) {
+    const trimmedName = formData.name.trim();
+    const trimmedSub = formData.subcategory.trim();
+    if (!trimmedName) {
       toast.error("Category name is required");
+      return;
+    }
+
+    const duplicate = categories.some(c => {
+      if (editingCategory && c.id === editingCategory.id) return false;
+      return (
+        c.title.trim().toLowerCase() === trimmedName.toLowerCase() &&
+        (c.subcategory || "").trim().toLowerCase() === trimmedSub.toLowerCase()
+      );
+    });
+    if (duplicate) {
+      toast.error(
+        trimmedSub
+          ? `Category "${trimmedName} - ${trimmedSub}" already exists`
+          : `Category "${trimmedName}" already exists`
+      );
       return;
     }
 
     try {
       setIsSaving(true);
+      const payload = { name: trimmedName, subcategory: trimmedSub };
       
       if (editingCategory) {
-        await directus.request(updateItem('components_types', editingCategory.id, formData));
+        await directus.request(updateItem('components_types', editingCategory.id, payload));
         toast.success("Category updated successfully");
       } else {
-        await directus.request(createItem('components_types', formData));
+        await directus.request(createItem('components_types', payload));
         toast.success("Category created successfully");
       }
       

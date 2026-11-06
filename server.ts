@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import dotenv from "dotenv";
@@ -7,9 +8,18 @@ import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import { createMockDirectusRouter } from "./server/mockDirectus.ts";
-import { getLcscComponentDetails } from "./server/lcsc.ts";
+import { getLcscComponentDetails, searchCatalogComponents } from "./server/lcsc.ts";
+import { setupScannerWebSocket, getLocalNetworkAddresses } from "./server/scannerWs.ts";
 
 dotenv.config();
+
+// Prevent server process termination on unexpected network/socket errors
+process.on("uncaughtException", (err) => {
+  console.error("[Process] Uncaught exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[Process] Unhandled rejection:", reason);
+});
 
 const SETTINGS_FILE = path.join(process.cwd(), 'settings.json');
 
@@ -20,15 +30,20 @@ const defaultSettings = {
 };
 
 function getSettings() {
+  dotenv.config({ override: true });
+  const currentDefaults = {
+    ...defaultSettings,
+    directusUrl: process.env.VITE_DIRECTUS_URL || defaultSettings.directusUrl,
+  };
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-      return { ...defaultSettings, ...JSON.parse(data) };
+      return { ...currentDefaults, ...JSON.parse(data) };
     }
   } catch (e) {
     console.error("[Settings] Error loading settings:", e);
   }
-  return defaultSettings;
+  return currentDefaults;
 }
 
 async function startServer() {
@@ -39,41 +54,53 @@ async function startServer() {
 
   const PORT = process.env.PORT || 3000;
 
-  // Request logging middleware
+  // Allow all devices on the local network (LAN / Tailscale) to access the server
   app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
     console.log(`[Request] ${req.method} ${req.url}`);
     next();
   });
 
   const mockRouter = createMockDirectusRouter();
+  let cachedProxyTarget = "";
+  let cachedProxyMiddleware: any = null;
 
   // Directus routing: use proxy if configured with a real external server, else use built-in mock
   app.use('/directus', (req, res, next) => {
     const current = getSettings();
-    const isCustomUrl = current.directusUrl && 
-      current.directusUrl.trim() !== "" && 
-      !current.directusUrl.includes("directus.example.com");
+    const targetUrl = current.directusUrl ? current.directusUrl.trim() : "";
+    const isCustomUrl =
+      targetUrl !== "" && !targetUrl.includes("directus.example.com");
 
     if (isCustomUrl) {
-      const proxy = createProxyMiddleware({
-        target: current.directusUrl,
-        changeOrigin: true,
-        pathRewrite: {
-          '^/directus': '',
-        },
-        on: {
-          proxyReq: (proxyReq, r, rs) => {
-            console.log(`[Proxy] ${r.method} ${r.url} -> ${proxyReq.path}`);
+      if (cachedProxyTarget !== targetUrl || !cachedProxyMiddleware) {
+        cachedProxyTarget = targetUrl;
+        cachedProxyMiddleware = createProxyMiddleware({
+          target: targetUrl,
+          changeOrigin: true,
+          pathRewrite: {
+            '^/directus': '',
           },
-          proxyRes: (proxyRes, r, rs) => {
-            console.log(`[Proxy Response] ${proxyRes.statusCode} ${r.url}`);
-          },
-          error: (err, r, rs) => {
-            console.error(`[Proxy Error] ${r.method} ${r.url}`, err);
+          on: {
+            proxyReq: (proxyReq, r) => {
+              console.log(`[Proxy] ${r.method} ${r.url} -> ${proxyReq.path}`);
+            },
+            proxyRes: (proxyRes, r) => {
+              console.log(`[Proxy Response] ${proxyRes.statusCode} ${r.url}`);
+            },
+            error: (err, r) => {
+              console.error(`[Proxy Error] ${r.method} ${r.url}`, err);
+            }
           }
-        }
-      });
-      return proxy(req, res, next);
+        });
+      }
+      return cachedProxyMiddleware(req, res, next);
     }
 
     // Default to self-contained mock Directus
@@ -104,14 +131,14 @@ async function startServer() {
 
   app.post("/api/restart", (req, res) => {
     console.log("[API] POST /api/restart");
-    res.json({ success: true, message: "Stopping application..." });
-    setTimeout(() => {
-      process.exit(0);
-    }, 1000);
+    dotenv.config({ override: true });
+    getSettings();
+    res.json({ success: true, message: "Configuration reloaded." });
   });
 
   // SerpApi Image Search Proxy Route
   app.get("/api/search-images", async (req, res) => {
+    dotenv.config({ override: true });
     const { q } = req.query;
     console.log(`[API] GET /api/search-images?q=${q}`);
 
@@ -144,6 +171,71 @@ async function startServer() {
     } catch (error: any) {
       console.error("[API] SerpApi failed", error.message);
       res.status(500).json({ error: "Failed to fetch images." });
+    }
+  });
+
+  // Live Component & Datasheet Part Lookup API (Octopart/Distributor/LCSC/SerpApi)
+  app.get("/api/part-search", async (req, res) => {
+    dotenv.config({ override: true });
+    const query = String(req.query.q || "").trim();
+    console.log(`[API] GET /api/part-search?q=${query}`);
+
+    if (!query) {
+      return res.status(400).json({ error: "Query parameter 'q' is required" });
+    }
+
+    try {
+      const results = await searchCatalogComponents(query, 12);
+      if (results.length > 0) {
+        return res.json({ results, source: "distributor_catalog" });
+      }
+
+      // Fallback: if SerpApi is configured, search Google for PDF datasheets & specs
+      if (process.env.SERPAPI_API_KEY) {
+        try {
+          const serpRes = await axios.get("https://serpapi.com/search.json", {
+            params: {
+              engine: "google",
+              q: `${query} datasheet filetype:pdf`,
+              api_key: process.env.SERPAPI_API_KEY,
+              num: 6
+            },
+            timeout: 8000
+          });
+          const organic: any[] = serpRes.data?.organic_results || [];
+          const fallbackResults = organic
+            .filter((r) => r.link)
+            .map((r, i) => ({
+              lcscPartNumber: "",
+              name: query.toUpperCase(),
+              manufacturer: r.displayed_link ? r.displayed_link.split("/")[0].replace(/^www\./, "") : "Web Datasheet",
+              manufacturerPartNumber: query.toUpperCase(),
+              package: "Standard",
+              category: "Electronic Components",
+              subcategory: "",
+              description: `${r.title || query}\n\n${r.snippet || ""}\n\n**Datasheet Source**: ${r.link}`,
+              datasheetUrl: r.link,
+              officialDatasheetUrl: r.link,
+              stock: 0,
+              unitPrice: null,
+              priceTiers: [],
+              images: [],
+              thumbnail: null,
+              parameters: [],
+              rohs: true,
+              productUrl: r.link,
+              source: `Web PDF (${i + 1})`
+            }));
+          return res.json({ results: fallbackResults, source: "web_pdf" });
+        } catch (serpErr: any) {
+          console.warn("[API] SerpApi PDF fallback failed:", serpErr.message);
+        }
+      }
+
+      return res.json({ results: [], source: "none" });
+    } catch (error: any) {
+      console.error(`[API] Part search error for "${query}":`, error.message);
+      res.status(500).json({ error: error.message || "Failed to search components." });
     }
   });
 
@@ -195,8 +287,9 @@ async function startServer() {
 
   // AI Research Route using Gemini API
   app.post("/api/ai-research", async (req, res) => {
-    const { name, context, categoriesInfo, packagesInfo, apiKey } = req.body;
-    console.log(`[API] POST /api/ai-research for component: ${name}`);
+    dotenv.config({ override: true });
+    const { name, context, categoriesInfo, packagesInfo, apiKey, onlyClassification } = req.body;
+    console.log(`[API] POST /api/ai-research for component: ${name} (onlyClassification=${!!onlyClassification})`);
 
     if (!name) {
       return res.status(400).json({ error: "Component name is required" });
@@ -210,18 +303,30 @@ async function startServer() {
 
     try {
       const ai = new GoogleGenAI({ apiKey: keyToUse });
+      const modelName = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Research the electronic component named "${name}".
-        Here is some context from search results: ${context || ''}
+        model: modelName,
+        contents: `Research and classify the electronic component named "${name}".
+        Context / Distributor Specifications:
+        ${context || 'None provided'}
        
-        CRITICAL INSTRUCTION FOR CATEGORIES, SUBCATEGORIES AND PACKAGES:
-        You MUST choose from the following existing categories and packages if they are even remotely similar. DO NOT suggest new ones unless absolutely no existing option fits.
-        Available categories and their subcategories: ${categoriesInfo || 'none'}.
-        Available packages: ${packagesInfo || 'none'}.
+        INSTRUCTIONS FOR CATEGORIES, SUBCATEGORIES, AND PACKAGES:
+        1. Available categories and their existing subcategories in the inventory database:
+           ${categoriesInfo || 'none'}
+        2. Available packages in the inventory database:
+           ${packagesInfo || 'none'}
+        3. Category & Subcategory rules:
+           - If an existing category and subcategory accurately fit this component, return their EXACT names from the available list.
+           - If an existing category fits (e.g., "Passives"), but none of its existing subcategories fit this specific component, return the EXACT existing category name and suggest a concise, standard subcategory name (e.g., "Inductors").
+           - If NO existing category accurately fits this component, suggest a concise, standard category name and subcategory name. Do NOT force a component into an unrelated category.
+        4. Package rules:
+           - If an existing package from the available list matches this component (including standard equivalents, e.g. "0805" matches "SMD 0805", "SOT23-3" matches "SOT-23"), return the EXACT package name from the available list.
+           - If no existing package matches, suggest a clean, standard electronic package name (e.g. "QFN-56", "SOIC-8", "SMD 0402", "SOT-23-5") without verbose CAD dimensions like "_L7.0-W7.0-P0.4-EP".
+        5. Keywords rules:
+           - Provide 5 to 8 concise, relevant technical search keywords (e.g. component type, interface, core family, voltage/value, manufacturer, function).
        
-        Provide a detailed technical description for an inventory system in Markdown format.
+        ${onlyClassification ? 'Provide a brief summary in description.' : `Provide a detailed technical description for an inventory system in Markdown format.
         IMPORTANT FORMATTING RULES:
         - Use proper markdown formatting with double newlines (\\n\\n) between paragraphs.
         - Use bullet points for lists.
@@ -229,7 +334,7 @@ async function startServer() {
         Include:
         - Component description
         - Pinout information
-        - Key characteristics/specifications
+        - Key characteristics/specifications`}
        
         Return the data in JSON format matching the schema.`,
         config: {
@@ -237,10 +342,10 @@ async function startServer() {
           responseSchema: {
             type: "OBJECT",
             properties: {
-              description: { type: "STRING", description: "A detailed technical description in Markdown format, including pinout, characteristics, etc. MUST use proper line breaks." },
-              category: { type: "STRING", description: "The best-matching category from the available list or a suggested new one" },
-              subcategory: { type: "STRING", description: "The best-matching subcategory from the chosen category's subcategories, or a suggested new one" },
-              package: { type: "STRING", description: "The best-matching package from the available list or a suggested new one" },
+              description: { type: "STRING", description: "Technical description in Markdown format." },
+              category: { type: "STRING", description: "Exact matching category from the available list, or a concise new category name" },
+              subcategory: { type: "STRING", description: "Exact matching subcategory for the category, or a concise new subcategory name" },
+              package: { type: "STRING", description: "Exact matching package from the available list, or a clean standard package name" },
               keywords: { type: "ARRAY", items: { type: "STRING" }, description: "Relevant technical keywords" },
               packet_reference: { type: "STRING", description: "A likely manufacturer part number or reference" }
             },
@@ -249,7 +354,8 @@ async function startServer() {
         }
       });
 
-      const data = JSON.parse(response.text || "{}");
+      const rawText = (response.text || "{}").replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      const data = JSON.parse(rawText);
 
       if (data.description) {
         data.description = data.description.replace(/\\n/g, '\n');
@@ -258,14 +364,32 @@ async function startServer() {
       res.json(data);
     } catch (error: any) {
       console.error("[API] AI Research failed", error);
-      res.status(500).json({ error: "Failed to research component." });
+      let friendlyMessage = error.message || "Failed to research component.";
+      try {
+        const parsedErr = JSON.parse(friendlyMessage);
+        if (parsedErr?.error?.message) {
+          friendlyMessage = parsedErr.error.message;
+        }
+      } catch {
+        // Not a JSON string error
+      }
+      res.status(500).json({ error: friendlyMessage });
     }
   });
+
+  const httpServer = http.createServer(app);
+  setupScannerWebSocket(app, httpServer, Number(PORT));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        host: "0.0.0.0",
+        cors: true,
+        allowedHosts: true,
+        hmr: process.env.DISABLE_HMR === "true" ? false : { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -277,9 +401,15 @@ async function startServer() {
     });
   }
 
-  app.listen(Number(PORT), "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Access locally at http://localhost:${PORT}`);
+  httpServer.listen(Number(PORT), "0.0.0.0", () => {
+    const netAddrs = getLocalNetworkAddresses();
+    console.log(`\n========================================================`);
+    console.log(`Server running on 0.0.0.0:${PORT} (accessible on all network interfaces)`);
+    console.log(`  -> Local:   http://localhost:${PORT}`);
+    for (const addr of netAddrs) {
+      console.log(`  -> Network: http://${addr.ip}:${PORT} (${addr.name}${addr.isTailscale ? " - Tailscale" : ""})`);
+    }
+    console.log(`========================================================\n`);
   });
 }
 

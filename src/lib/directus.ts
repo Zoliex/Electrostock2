@@ -38,6 +38,7 @@ export interface Component {
   package: number | ComponentPackage; // Package ID or Package object
   type: number | ComponentType; // Type ID or Type object
   barcode: string | null;
+  price?: number | null;
   other_images?: ComponentFile[];
   other_files?: ComponentFile[];
   date_created?: string;

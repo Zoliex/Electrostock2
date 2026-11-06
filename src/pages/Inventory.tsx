@@ -510,7 +510,7 @@ export function Inventory() {
                     : selectedCategories.length === 1 
                       ? (() => {
                           const type = types.find(t => t.id === selectedCategories[0]);
-                          return type ? `${type.name} - ${type.subcategory || type.name}` : "1 selected";
+                          return type ? (type.subcategory ? `${type.name} - ${type.subcategory}` : type.name) : "1 selected";
                         })()
                       : `${selectedCategories.length} selected`}
                 </span>
@@ -546,7 +546,7 @@ export function Inventory() {
                             selectedCategories.includes(t.id) ? "bg-primary/10 text-primary font-bold" : "hover:bg-slate-50 dark:hover:bg-slate-800"
                           )}
                         >
-                          <span>{name} - {t.subcategory || t.name}</span>
+                          <span>{t.subcategory ? `${name} - ${t.subcategory}` : name}</span>
                           {selectedCategories.includes(t.id) && <div className="w-2 h-2 rounded-full bg-primary" />}
                         </button>
                       ))}

@@ -1,0 +1,304 @@
+{
+  "boxes": [
+    {
+      "id": "box-01",
+      "name": "Drawer A-01",
+      "description": "Microcontrollers and Development Boards",
+      "unique_id": "BOX-A01"
+    },
+    {
+      "id": "box-02",
+      "name": "Drawer A-02",
+      "description": "Environmental, Motion & Optical Sensors",
+      "unique_id": "BOX-A02"
+    },
+    {
+      "id": "box-03",
+      "name": "Bin B-10",
+      "description": "SMD Passive Components (0603 & 0805)",
+      "unique_id": "BIN-B10"
+    },
+    {
+      "id": "box-04",
+      "name": "Drawer C-05",
+      "description": "Linear Regulators & Power Management ICs",
+      "unique_id": "BOX-C05"
+    },
+    {
+      "id": "box-05",
+      "name": "Bin D-02",
+      "description": "Discrete Semiconductors & Diodes",
+      "unique_id": "BIN-D02"
+    }
+  ],
+  "components_types": [
+    {
+      "id": 1,
+      "name": "Microcontrollers",
+      "subcategory": "32-bit MCU"
+    },
+    {
+      "id": 2,
+      "name": "Sensors",
+      "subcategory": "Environmental & IMU"
+    },
+    {
+      "id": 3,
+      "name": "Passives",
+      "subcategory": "Resistors"
+    },
+    {
+      "id": 4,
+      "name": "Power Management",
+      "subcategory": "Voltage Regulators"
+    },
+    {
+      "id": 5,
+      "name": "Interface & Communication",
+      "subcategory": "Transceivers"
+    },
+    {
+      "id": 6,
+      "name": "Discrete Semiconductors",
+      "subcategory": "Transistors & Diodes"
+    },
+    {
+      "id": 7,
+      "name": "Passives",
+      "subcategory": "Capacitors"
+    }
+  ],
+  "components_packages": [
+    {
+      "id": 1,
+      "name": "DIP-8"
+    },
+    {
+      "id": 2,
+      "name": "SOIC-8"
+    },
+    {
+      "id": 3,
+      "name": "QFN-32"
+    },
+    {
+      "id": 4,
+      "name": "LQFP-64"
+    },
+    {
+      "id": 5,
+      "name": "SMD 0805"
+    },
+    {
+      "id": 6,
+      "name": "SMD 0603"
+    },
+    {
+      "id": 7,
+      "name": "TO-220"
+    },
+    {
+      "id": 8,
+      "name": "SOT-23"
+    }
+  ],
+  "components": [
+    {
+      "id": 1,
+      "name": "ESP32-WROOM-32D",
+      "description": "Wi-Fi + BT + BLE MCU module with dual Xtensa 32-bit LX6 cores up to 240 MHz, 4MB Flash.\n\n### Specifications\n- **CPU**: Dual-core 32-bit LX6 @ 240MHz\n- **RAM**: 520 KB SRAM\n- **Flash**: 4 MB SPI Flash\n- **Wireless**: 802.11 b/g/n + BT 4.2 BR/EDR/BLE",
+      "quantity_available": 24,
+      "location": "box-01",
+      "package": 3,
+      "type": 1,
+      "barcode": "ES32-WR-001",
+      "keywords": [
+        "esp32",
+        "wifi",
+        "bluetooth",
+        "espressif"
+      ],
+      "packet_reference": "ESP32-WROOM-32D-N4",
+      "date_created": "2026-01-15T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "name": "STM32F401RE",
+      "description": "High-performance ARM Cortex-M4 32-bit MCU with FPU, 84 MHz, 512 KB Flash, 96 KB SRAM.\n\n### Key Features\n- 84 MHz maximum frequency\n- 512 Kbytes of Flash memory\n- 96 Kbytes of SRAM\n- USB 2.0 OTG FS",
+      "quantity_available": 8,
+      "location": "box-01",
+      "package": 4,
+      "type": 1,
+      "barcode": "STM32-401-002",
+      "keywords": [
+        "stm32",
+        "arm",
+        "cortex-m4",
+        "stmicroelectronics"
+      ],
+      "packet_reference": "STM32F401RET6",
+      "date_created": "2026-01-18T14:30:00Z"
+    },
+    {
+      "id": 3,
+      "name": "BME280 Digital Sensor",
+      "description": "Combined digital humidity, pressure and temperature sensor based on proven sensing principles.\n\n### Parameters\n- Temperature range: -40 to +85 °C\n- Pressure range: 300 to 1100 hPa\n- Humidity range: 0 to 100% RH\n- Interface: I2C and SPI",
+      "quantity_available": 5,
+      "location": "box-02",
+      "package": 8,
+      "type": 2,
+      "barcode": "BME280-003",
+      "keywords": [
+        "sensor",
+        "temperature",
+        "humidity",
+        "bosch"
+      ],
+      "packet_reference": "BME280",
+      "date_created": "2026-02-01T09:15:00Z"
+    },
+    {
+      "id": 4,
+      "name": "LM7805 Linear Regulator",
+      "description": "Positive 3-terminal voltage regulator with 5V fixed output and 1.5A current capability.\n\n### Specifications\n- Output Voltage: 5.0 V\n- Max Output Current: 1.5 A\n- Package: TO-220\n- Thermal Overload Protection: Built-in",
+      "quantity_available": 42,
+      "location": "box-04",
+      "package": 7,
+      "type": 4,
+      "barcode": "LM7805-004",
+      "keywords": [
+        "regulator",
+        "linear",
+        "5v",
+        "power",
+        "ti"
+      ],
+      "packet_reference": "LM7805CT",
+      "date_created": "2026-02-10T11:20:00Z"
+    },
+    {
+      "id": 5,
+      "name": "MPU-6050 6-DoF IMU",
+      "description": "6-axis MotionTracking device combining a 3-axis gyroscope and a 3-axis accelerometer on a single silicon die with Digital Motion Processor (DMP).\n\n### Characteristics\n- I2C digital output\n- 16-bit ADCs on all axes\n- User-programmable full scale ranges",
+      "quantity_available": 15,
+      "location": "box-02",
+      "package": 3,
+      "type": 2,
+      "barcode": "MPU6050-005",
+      "keywords": [
+        "imu",
+        "gyro",
+        "accelerometer",
+        "invensense"
+      ],
+      "packet_reference": "MPU-6050",
+      "date_created": "2026-02-12T16:45:00Z"
+    },
+    {
+      "id": 6,
+      "name": "10k Resistor 0805 1%",
+      "description": "Surface mount thick film chip resistor 10k ohm 1% 1/8W 0805 SMD.",
+      "quantity_available": 350,
+      "location": "box-03",
+      "package": 5,
+      "type": 3,
+      "barcode": "RES-10K-0805",
+      "keywords": [
+        "resistor",
+        "smd",
+        "passive",
+        "10k"
+      ],
+      "packet_reference": "RC0805FR-0710KL",
+      "date_created": "2026-02-15T08:00:00Z"
+    },
+    {
+      "id": 7,
+      "name": "100nF Ceramic Capacitor 0805",
+      "description": "Multilayer ceramic capacitor (MLCC) 0.1uF 50V X7R 10% 0805 SMD decoupling capacitor.",
+      "quantity_available": 4,
+      "location": "box-03",
+      "package": 5,
+      "type": 3,
+      "barcode": "CAP-100N-0805",
+      "keywords": [
+        "capacitor",
+        "ceramic",
+        "decoupling",
+        "0805"
+      ],
+      "packet_reference": "CC0805KRX7R9BB104",
+      "date_created": "2026-02-20T12:00:00Z"
+    },
+    {
+      "name": "RP2040",
+      "description": "## RP2040\n**Manufacturer**: Raspberry Pi (RP2040)\n**LCSC Part**: [C2040](https://www.lcsc.com/product-detail/C2040.html)\n**Package / Footprint**: `LQFN-56_L7.0-W7.0-P0.4-EP`\n**Unit Price**: $1.0969 USD\n**In-Stock at LCSC**: 54 898 units\n\n📄 [Download Official Datasheet (PDF)](https://datasheet.lcsc.com/datasheet/pdf/3dad1d8f987a4e00bfc677055df1f959.pdf?productCode=C2040)\n\n### Price Tiers (USD)\n| Quantity | Unit Price |\n| :--- | :--- |\n| 1+ | $1.0969 |\n| 10+ | $1.0093 |\n| 30+ | $0.9267 |\n| 100+ | $0.8656 |\n| 500+ | $0.7450 |\n| 1000+ | $0.7318 |\n\n### Technical Specifications\n- **ADC (Bit)**: 12bit\n- **Number of I/O**: 30\n- **Operating Temperature**: -20℃~+85℃\n- **Voltage - Supply**: 1.8V~3.3V\n- **Program Memory Type**: External\n- **CPU Core**: ARM Cortex-M0+\n- **Core Size**: 32 Bit\n- **CPU Maximum Speed**: 133MHz\n- **Oscillator Type**: Built-in+External",
+      "quantity_available": 0,
+      "location": "box-01",
+      "url": "https://www.lcsc.com/product-detail/C2040.html",
+      "keywords": [
+        "C2040",
+        "RP2040",
+        "RASPBERRY PI",
+        "LCSC"
+      ],
+      "packet_reference": "RP2040",
+      "package": 1,
+      "type": 1,
+      "barcode": null,
+      "main_image": "file-p1yjrvti",
+      "datasheet": "file-1txzrrtk",
+      "id": 8,
+      "date_created": "2026-11-01T15:39:58.167Z"
+    }
+  ],
+  "components_files": [
+    {
+      "components_id": 8,
+      "directus_files_id": "file-kjb1su82",
+      "id": 1,
+      "date_created": "2026-11-01T15:39:58.189Z"
+    },
+    {
+      "components_id": 8,
+      "directus_files_id": "file-i4nc48yr",
+      "id": 2,
+      "date_created": "2026-11-01T15:39:58.203Z"
+    }
+  ],
+  "components_files_1": [
+    {
+      "components_id": 8,
+      "directus_files_id": "file-cg87vao3",
+      "id": 1,
+      "date_created": "2026-11-01T15:39:58.224Z"
+    }
+  ],
+  "files": [
+    {
+      "id": "file-p1yjrvti",
+      "filename": "component-image.png",
+      "mimeType": "image/png"
+    },
+    {
+      "id": "file-1txzrrtk",
+      "filename": "component-image.png",
+      "mimeType": "image/png"
+    },
+    {
+      "id": "file-kjb1su82",
+      "filename": "component-image.png",
+      "mimeType": "image/png"
+    },
+    {
+      "id": "file-i4nc48yr",
+      "filename": "component-image.png",
+      "mimeType": "image/png"
+    },
+    {
+      "id": "file-cg87vao3",
+      "filename": "component-image.png",
+      "mimeType": "image/png"
+    }
+  ]
+}

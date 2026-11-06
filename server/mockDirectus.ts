@@ -24,12 +24,13 @@ const defaultBoxes = [
 ];
 
 const defaultTypes = [
-  { id: 1, name: "Microcontrollers", subcategory: "ARM Cortex, ESP32, AVR, STM32" },
-  { id: 2, name: "Sensors", subcategory: "Temperature, Humidity, Pressure, IMU, Optical" },
-  { id: 3, name: "Passives", subcategory: "Resistors, Capacitors, Inductors" },
-  { id: 4, name: "Power Management", subcategory: "Voltage Regulators, LDO, Buck-Boost, Battery Chargers" },
-  { id: 5, name: "Interface & Communication", subcategory: "CAN, RS485, USB, Ethernet, Bluetooth" },
-  { id: 6, name: "Discrete Semiconductors", subcategory: "MOSFETs, Diodes, BJTs" }
+  { id: 1, name: "Microcontrollers", subcategory: "32-bit MCU" },
+  { id: 2, name: "Sensors", subcategory: "Environmental & IMU" },
+  { id: 3, name: "Passives", subcategory: "Resistors" },
+  { id: 4, name: "Power Management", subcategory: "Voltage Regulators" },
+  { id: 5, name: "Interface & Communication", subcategory: "Transceivers" },
+  { id: 6, name: "Discrete Semiconductors", subcategory: "Transistors & Diodes" },
+  { id: 7, name: "Passives", subcategory: "Capacitors" }
 ];
 
 const defaultPackages = [

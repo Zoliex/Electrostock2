@@ -16,6 +16,7 @@ import { AddComponent } from "./pages/AddComponent";
 import { BatchBarcodes } from "./pages/BatchBarcodes";
 import { Boxes } from "./pages/Boxes";
 import { Settings } from "./pages/Settings";
+import { RemoteScanner } from "./pages/RemoteScanner";
 import { useEffect, useState } from "react";
 import { ServerCrash, RefreshCw } from "lucide-react";
 
@@ -37,6 +38,7 @@ function AppContent() {
     const path = location.pathname;
     let pageName = "Dashboard";
     if (path === "/") pageName = "Dashboard";
+    else if (path.startsWith("/remote-scan")) pageName = "Remote Scanner";
     else if (path.startsWith("/inventory/add")) pageName = "Add Component";
     else if (path.startsWith("/inventory/edit")) pageName = "Edit Component";
     else if (path.startsWith("/inventory")) pageName = "Inventory";
@@ -69,10 +71,19 @@ function AppContent() {
         if (buffer.length > 2) {
           // Check if user is NOT focusing on an input
           const activeTag = document.activeElement?.tagName;
-          const isAddOrEditPage = window.location.pathname.includes('/inventory/add') || window.location.pathname.includes('/inventory/edit');
+          const isAddOrEditPage =
+            window.location.pathname.includes('/inventory/add') ||
+            window.location.pathname.includes('/inventory/edit') ||
+            window.location.pathname.includes('/remote-scan');
           
           if (activeTag !== "INPUT" && activeTag !== "TEXTAREA" && !isAddOrEditPage) {
-             navigate(`/inventory?q=${encodeURIComponent(buffer)}`);
+            const sessionMatch = buffer.match(/[?&]session=([A-Za-z0-9_-]+)/i) || buffer.match(/^SESSION:([A-Za-z0-9_-]+)$/i);
+            if (buffer.includes("/remote-scan") || sessionMatch) {
+              const sid = sessionMatch ? sessionMatch[1].toUpperCase() : "AUTO";
+              navigate(`/remote-scan?session=${encodeURIComponent(sid)}`);
+            } else {
+              navigate(`/inventory?q=${encodeURIComponent(buffer)}`);
+            }
           }
         }
         buffer = "";
@@ -85,6 +96,15 @@ function AppContent() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [navigate]);
+
+  if (location.pathname.startsWith("/remote-scan")) {
+    return (
+      <div className="min-h-screen w-full bg-slate-950 text-white font-display">
+        <Toaster position="top-center" richColors />
+        <RemoteScanner />
+      </div>
+    );
+  }
 
   if (isBackendDown) {
     return (
@@ -120,6 +140,7 @@ function AppContent() {
           <Route path="/boxes" element={<Boxes />} />
           <Route path="/barcodes" element={<BatchBarcodes />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/remote-scan" element={<RemoteScanner />} />
         </Routes>
       </main>
       <Footer />

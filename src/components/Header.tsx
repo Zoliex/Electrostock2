@@ -23,6 +23,7 @@ export function Header() {
     { name: "Categories", path: "/categories" },
     { name: "Boxes", path: "/boxes" },
     { name: "Barcodes", path: "/barcodes" },
+    { name: "Scanner PC", path: "/remote-scan" },
     { name: "Settings", path: "/settings" },
   ];
 
@@ -63,7 +64,34 @@ export function Header() {
 
   const handleScan = (decodedText: string) => {
     setIsScannerOpen(false);
-    navigate(`/inventory?q=${encodeURIComponent(decodedText)}`);
+    const trimmed = decodedText.trim();
+    if (!trimmed) return;
+
+    // 1. Check if the user scanned the PC WebSocket pairing QR code (URL containing /remote-scan or ?session=...)
+    const sessionUrlMatch =
+      trimmed.match(/[?&]session=([A-Za-z0-9_-]+)/i) ||
+      trimmed.match(/^SESSION:([A-Za-z0-9_-]+)$/i);
+
+    if (trimmed.includes("/remote-scan") || sessionUrlMatch) {
+      const sid = sessionUrlMatch ? sessionUrlMatch[1].toUpperCase() : "AUTO";
+      navigate(`/remote-scan?session=${encodeURIComponent(sid)}`);
+      return;
+    }
+
+    // 2. Check if the user scanned an LCSC 2D bag QR code (e.g. {pbn:...,pc:C11368,pdi:130138209})
+    // If there's an active PC import session, offer/search cleanly by extracted barcode or C-code
+    const pdiMatch = trimmed.match(/(?:pdi|pi)\s*[:=]\s*"?(\d{5,15})"?/i);
+    const pcMatch = trimmed.match(/(?:pc|p|part|code)\s*[:=]\s*"?(C\d{3,10})"?/i);
+    if (pdiMatch) {
+      navigate(`/inventory?q=${encodeURIComponent(`X${pdiMatch[1]}`)}`);
+      return;
+    }
+    if (pcMatch) {
+      navigate(`/inventory?q=${encodeURIComponent(pcMatch[1].toUpperCase())}`);
+      return;
+    }
+
+    navigate(`/inventory?q=${encodeURIComponent(trimmed)}`);
   };
 
   const isMoreActive = moreNavLinks.some(link => location.pathname === link.path);
