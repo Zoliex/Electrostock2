@@ -12,6 +12,7 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import { createMockDirectusRouter } from "./server/mockDirectus.ts";
 import { getLcscComponentDetails, searchCatalogComponents } from "./server/lcsc.ts";
 import { setupScannerWebSocket, getLocalNetworkAddresses } from "./server/scannerWs.ts";
+import { estimateComponentPrice } from "./server/autoPrice.ts";
 
 dotenv.config();
 
@@ -131,6 +132,9 @@ async function startServer() {
               console.log(`[Proxy] ${r.method} ${r.url} -> ${proxyReq.path}`);
             },
             proxyRes: (proxyRes, r) => {
+              // Strip Directus CSP headers to allow PDFs and assets to display seamlessly in browsers
+              delete proxyRes.headers['content-security-policy'];
+              delete proxyRes.headers['content-security-policy-report-only'];
               console.log(`[Proxy Response] ${proxyRes.statusCode} ${r.url}`);
             },
             error: (err, r) => {
@@ -304,7 +308,7 @@ async function startServer() {
     }
 
     try {
-      const response = await axios.get(rawUrl, {
+      let response = await axios.get(rawUrl, {
         responseType: "arraybuffer",
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -314,10 +318,36 @@ async function startServer() {
         maxRedirects: 5
       });
 
-      const contentType = String(response.headers["content-type"] || "application/octet-stream");
+      let contentType = String(response.headers["content-type"] || "application/octet-stream");
+      let buffer = Buffer.from(response.data);
+
+      // If remote returned an HTML page wrapper (e.g. LCSC Next.js datasheet viewer)
+      if (contentType.includes("text/html") || buffer.slice(0, 100).toString().includes("<!DOCTYPE html")) {
+        const htmlStr = buffer.toString("utf8");
+        const matchPdf =
+          htmlStr.match(/"previewPdfUrl"\s*:\s*"(https:[^"]+)"/) ||
+          htmlStr.match(/<iframe[^>]*src=["'](https:[^"']+\.pdf[^"']*)["']/i);
+
+        if (matchPdf && matchPdf[1]) {
+          const directPdfUrl = matchPdf[1].replace(/\\u0026/g, "&");
+          console.log(`[Proxy Download] Extracted direct PDF URL from HTML wrapper: ${directPdfUrl}`);
+          const pdfResponse = await axios.get(directPdfUrl, {
+            responseType: "arraybuffer",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Accept": "*/*"
+            },
+            timeout: 15000,
+            maxRedirects: 5
+          });
+          contentType = String(pdfResponse.headers["content-type"] || "application/pdf");
+          buffer = Buffer.from(pdfResponse.data);
+        }
+      }
+
       res.setHeader("Content-Type", contentType);
       res.setHeader("Cache-Control", "public, max-age=86400");
-      res.send(Buffer.from(response.data));
+      res.send(buffer);
     } catch (error: any) {
       console.error(`[Proxy Download Error] URL: ${rawUrl}`, error.message);
       res.status(500).json({ error: "Failed to download asset from remote server" });
@@ -413,6 +443,77 @@ async function startServer() {
         // Not a JSON string error
       }
       res.status(500).json({ error: friendlyMessage });
+    }
+  });
+
+  // Single Component Automatic Price Estimation
+  app.post("/api/auto-price", async (req, res) => {
+    dotenv.config({ override: true });
+    const { component, apiKey } = req.body;
+
+    if (!component || !component.name) {
+      return res.status(400).json({ error: "Component object with 'name' is required" });
+    }
+
+    try {
+      const estimate = await estimateComponentPrice(component, apiKey);
+      res.json(estimate);
+    } catch (err: any) {
+      console.error("[API] Auto-price error:", err.message);
+      res.status(500).json({ error: err.message || "Failed to estimate price" });
+    }
+  });
+
+  // Batch Component Automatic Price Estimation
+  app.post("/api/batch-auto-price", async (req, res) => {
+    dotenv.config({ override: true });
+    const { components, apiKey } = req.body;
+
+    if (!Array.isArray(components) || components.length === 0) {
+      return res.status(400).json({ error: "Array of components is required" });
+    }
+
+    console.log(`[API] POST /api/batch-auto-price for ${components.length} components`);
+
+    try {
+      // Process in concurrency-controlled chunks (3 items at a time to respect rate limits)
+      const results: any[] = [];
+      const CHUNK_SIZE = 3;
+
+      for (let i = 0; i < components.length; i += CHUNK_SIZE) {
+        const chunk = components.slice(i, i + CHUNK_SIZE);
+        const chunkPromises = chunk.map(async (comp) => {
+          try {
+            const estimate = await estimateComponentPrice(comp, apiKey);
+            return {
+              id: comp.id,
+              name: comp.name,
+              success: true,
+              estimate
+            };
+          } catch (itemErr: any) {
+            return {
+              id: comp.id,
+              name: comp.name,
+              success: false,
+              error: itemErr.message
+            };
+          }
+        });
+
+        const chunkResults = await Promise.all(chunkPromises);
+        results.push(...chunkResults);
+
+        // Small delay between chunks to avoid hitting AI/LCSC rate limits
+        if (i + CHUNK_SIZE < components.length) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+
+      res.json({ results });
+    } catch (err: any) {
+      console.error("[API] Batch auto-price error:", err.message);
+      res.status(500).json({ error: err.message || "Batch price estimation failed" });
     }
   });
 

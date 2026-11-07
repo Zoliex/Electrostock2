@@ -70,14 +70,15 @@ function mapJlcItemToComponentInfo(item: any): LcscComponentInfo {
   const subcategory = item.firstSortName || item.componentTypeEn || "";
   const summary = (item.describe || "").trim();
 
-  // Prefer the signed direct download URL for reliable PDF fetching, fall back to official/LCSC URL
+  // Prefer the direct signed PDF download URL (item.pdfUrl)
   const datasheetUrl =
+    item.pdfUrl ||
     item.dataManualFileAccessIdUrl ||
     item.dataManualOfficialLink ||
     item.dataManualUrl ||
-    (code ? `https://www.lcsc.com/datasheet/${code}.pdf` : "");
+    (code ? `https://datasheet.lcsc.com/datasheet/${code}.pdf` : "");
 
-  const officialDatasheetUrl = item.dataManualOfficialLink || item.dataManualUrl || datasheetUrl;
+  const officialDatasheetUrl = item.pdfUrl || item.dataManualOfficialLink || item.dataManualUrl || datasheetUrl;
 
   const rawPrices = Array.isArray(item.componentPrices) && item.componentPrices.length > 0
     ? item.componentPrices

@@ -28,7 +28,9 @@ import {
   ExternalLink,
   Download,
   Paperclip,
-  Maximize2
+  Maximize2,
+  Sparkles,
+  Coins
 } from "lucide-react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { directus, Component, getFileUrl, ComponentType, Box, ComponentPackage } from "../lib/directus";
@@ -268,6 +270,55 @@ export function ComponentDetails() {
       toast.error("Failed to update stock");
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const [isEstimatingPrice, setIsEstimatingPrice] = useState(false);
+
+  const handleAutoEstimatePrice = async () => {
+    if (!component) return;
+    setIsEstimatingPrice(true);
+    const toastId = toast.loading("Looking up price (Supplier link, Market, LCSC, AI)...");
+
+    try {
+      const categoryName = (component.type as ComponentType)?.name || "";
+      const packageName = (component.package as ComponentPackage)?.name || "";
+
+      const res = await fetch("/api/auto-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          component: {
+            id: component.id,
+            name: component.name,
+            packet_reference: component.packet_reference,
+            barcode: component.barcode,
+            category: categoryName,
+            package: packageName,
+            description: component.description,
+            url: component.url
+          }
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data.price === "number") {
+          await directus.request(updateItem("components", Number(component.id), { price: data.price }));
+          setComponent((prev) => (prev ? { ...prev, price: data.price } : null));
+          toast.success(`Price applied: ${data.price.toFixed(4)} € (${data.sourceLabel})`, {
+            id: toastId
+          });
+        } else {
+          toast.error("Invalid price format returned", { id: toastId });
+        }
+      } else {
+        toast.error("Could not automatically price this component", { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err.message}`, { id: toastId });
+    } finally {
+      setIsEstimatingPrice(false);
     }
   };
 
@@ -683,26 +734,49 @@ export function ComponentDetails() {
               </div>
             </div>
 
-            {/* Unit Price Paid & Total Stock Cost */}
+            {/* Unit Price & Total Stock Value */}
             <div className="grid grid-cols-2 gap-3 mb-6">
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                  Unit Price Paid
-                </p>
-                <p className="text-base font-black font-mono text-slate-900 dark:text-white">
+              {/* Unit Price Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex flex-col justify-between min-h-[76px]">
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
+                    Unit Price
+                  </span>
+                  <button
+                    onClick={handleAutoEstimatePrice}
+                    disabled={isEstimatingPrice}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-primary bg-primary/10 hover:bg-primary/20 transition-all cursor-pointer disabled:opacity-50 shrink-0"
+                    title="Automatically estimate price using supplier link, market search, LCSC, or AI"
+                  >
+                    {isEstimatingPrice ? (
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-2.5 h-2.5" />
+                    )}
+                    <span>{component.price ? "Update" : "Price"}</span>
+                  </button>
+                </div>
+                <p className="text-lg font-black font-mono text-slate-900 dark:text-white truncate">
                   {component.price !== null && component.price !== undefined && !isNaN(Number(component.price))
                     ? `€${Number(component.price) < 1 && Number(component.price) > 0 ? Number(component.price).toFixed(4).replace(/0+$/, "").replace(/\.$/, ".00") : Number(component.price).toFixed(2)}`
-                    : "N/A"}
+                    : "—"}
                 </p>
               </div>
-              <div className="p-3.5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1">
-                  Stock Cost
-                </p>
-                <p className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+
+              {/* Total Stock Value Card */}
+              <div className="p-3.5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20 flex flex-col justify-between min-h-[76px]">
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 truncate">
+                    Total Value
+                  </span>
+                  <div className="size-5 rounded-md bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                    <Coins className="w-3 h-3" />
+                  </div>
+                </div>
+                <p className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400 truncate">
                   {component.price !== null && component.price !== undefined && !isNaN(Number(component.price))
                     ? `€${(Number(component.price) * (Number(component.quantity_available) || 0)).toFixed(2)}`
-                    : "N/A"}
+                    : "—"}
                 </p>
               </div>
             </div>

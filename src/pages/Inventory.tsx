@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
-import { Download, Plus, Loader2, Package, Filter, ArrowUpDown, Search, X, AlertTriangle, ChevronLeft, ChevronRight, Layers, Camera, ChevronDown, Minus, Trash2 } from "lucide-react";
+import { Download, Plus, Loader2, Package, Filter, ArrowUpDown, Search, X, AlertTriangle, ChevronLeft, ChevronRight, Layers, Camera, ChevronDown, Minus, Trash2, Sparkles } from "lucide-react";
 import { directus, Component, getFileUrl, ComponentType, Box, ComponentPackage } from "../lib/directus";
 import { readItems, aggregate, updateItem, deleteItem } from "@directus/sdk";
 import { BarcodeScanner } from "../components/BarcodeScanner";
+import { BatchAutoPricingModal } from "../components/BatchAutoPricingModal";
 import { cn } from "../lib/utils";
 import { toast } from "sonner";
 
@@ -13,6 +14,7 @@ export function Inventory() {
   const [types, setTypes] = useState<ComponentType[]>([]);
   const [locations, setLocations] = useState<Box[]>([]);
   const [packages, setPackages] = useState<ComponentPackage[]>([]);
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -125,82 +127,82 @@ export function Inventory() {
     fetchOptions();
   }, []);
 
-  useEffect(() => {
-    const fetchComponents = async () => {
-      setIsLoading(true);
-      try {
-        const filter: any = { _and: [] };
+  const fetchComponents = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const filter: any = { _and: [] };
 
-        if (searchQuery) {
-          filter._and.push({
-            _or: [
-              { name: { _icontains: searchQuery } },
-              { description: { _icontains: searchQuery } },
-              { barcode: { _icontains: searchQuery } },
-              { packet_reference: { _icontains: searchQuery } }
-            ]
-          });
-        }
-
-        if (selectedCategories.length > 0) {
-          filter._and.push({ type: { _in: selectedCategories } });
-        }
-
-        if (selectedLocations.length > 0) {
-          filter._and.push({ location: { _in: selectedLocations } });
-        }
-
-        if (selectedPackages.length > 0) {
-          filter._and.push({ package: { _in: selectedPackages } });
-        }
-
-        if (filterParam === 'low_stock') {
-          filter._and.push({ quantity_available: { _lte: criticalThreshold } });
-        }
-
-        const queryParams: any = {
-          fields: ['*', 'type.*', 'package.*', 'location.*'] as any,
-          sort: sortBy === 'name' ? (sortOrder === 'asc' ? 'name' : '-name') :
-                sortBy === 'quantity' ? (sortOrder === 'asc' ? 'quantity_available' : '-quantity_available') :
-                (sortOrder === 'asc' ? 'date_created' : '-date_created'),
-          filter: filter._and.length > 0 ? filter : undefined,
-          limit: itemsPerPage,
-          page: currentPage
-        };
-
-        const [response, countResponse] = await Promise.all([
-          directus.request(readItems('components', queryParams)),
-          directus.request(aggregate('components', {
-            query: { filter: filter._and.length > 0 ? filter : undefined },
-            aggregate: { count: '*' }
-          }))
-        ]) as any;
-        
-        const data = Array.isArray(response) ? response : (response.data || []);
-        const totalCount = Number(countResponse[0]?.count || 0);
-        
-        setComponents(data as unknown as Component[]);
-        setTotalItems(totalCount);
-
-        // Auto-redirect if single result matches barcode (only on first page search)
-        if (searchQuery && data.length === 1 && currentPage === 1) {
-            const item = data[0] as unknown as Component;
-            if (item.barcode) {
-                const barcodes = item.barcode.split(';').map(b => b.trim().toLowerCase());
-                if (barcodes.includes(searchQuery.toLowerCase())) {
-                     navigate(`/inventory/${item.id}`);
-                }
-            }
-        }
-      } catch (error) {
-        console.error("Error fetching components:", error);
-      } finally {
-        setIsLoading(false);
+      if (searchQuery) {
+        filter._and.push({
+          _or: [
+            { name: { _icontains: searchQuery } },
+            { description: { _icontains: searchQuery } },
+            { barcode: { _icontains: searchQuery } },
+            { packet_reference: { _icontains: searchQuery } }
+          ]
+        });
       }
-    };
 
+      if (selectedCategories.length > 0) {
+        filter._and.push({ type: { _in: selectedCategories } });
+      }
+
+      if (selectedLocations.length > 0) {
+        filter._and.push({ location: { _in: selectedLocations } });
+      }
+
+      if (selectedPackages.length > 0) {
+        filter._and.push({ package: { _in: selectedPackages } });
+      }
+
+      if (filterParam === 'low_stock') {
+        filter._and.push({ quantity_available: { _lte: criticalThreshold } });
+      }
+
+      const queryParams: any = {
+        fields: ['*', 'type.*', 'package.*', 'location.*'] as any,
+        sort: sortBy === 'name' ? (sortOrder === 'asc' ? 'name' : '-name') :
+              sortBy === 'quantity' ? (sortOrder === 'asc' ? 'quantity_available' : '-quantity_available') :
+              (sortOrder === 'asc' ? 'date_created' : '-date_created'),
+        filter: filter._and.length > 0 ? filter : undefined,
+        limit: itemsPerPage,
+        page: currentPage
+      };
+
+      const [response, countResponse] = await Promise.all([
+        directus.request(readItems('components', queryParams)),
+        directus.request(aggregate('components', {
+          query: { filter: filter._and.length > 0 ? filter : undefined },
+          aggregate: { count: '*' }
+        }))
+      ]) as any;
+      
+      const data = Array.isArray(response) ? response : (response.data || []);
+      const totalCount = Number(countResponse[0]?.count || 0);
+      
+      setComponents(data as unknown as Component[]);
+      setTotalItems(totalCount);
+
+      // Auto-redirect if single result matches barcode (only on first page search)
+      if (searchQuery && data.length === 1 && currentPage === 1) {
+          const item = data[0] as unknown as Component;
+          if (item.barcode) {
+              const barcodes = item.barcode.split(';').map(b => b.trim().toLowerCase());
+              if (barcodes.includes(searchQuery.toLowerCase())) {
+                   navigate(`/inventory/${item.id}`);
+              }
+          }
+      }
+    } catch (error) {
+      console.error("Error fetching components:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [searchQuery, selectedCategories, selectedLocations, selectedPackages, filterParam, sortBy, sortOrder, currentPage, navigate, criticalThreshold, itemsPerPage]);
+
+  useEffect(() => {
     fetchComponents();
-  }, [searchQuery, selectedCategories, selectedLocations, selectedPackages, filterParam, sortBy, sortOrder, currentPage, navigate, criticalThreshold]);
+  }, [fetchComponents]);
 
   const getStatus = (quantity: number) => {
     if (quantity === 0) return { label: "Out of Stock", color: "bg-red-500 text-white", stockColor: "text-red-500 font-bold" };
@@ -388,7 +390,13 @@ export function Inventory() {
             Manage your electronic stock and visual identification.
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => setIsPricingModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold text-sm hover:bg-emerald-500/20 transition-all shadow-sm"
+          >
+            <Sparkles className="w-4 h-4 text-emerald-500" /> Auto-Price Stock
+          </button>
           <button 
             onClick={handleExport}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
@@ -756,7 +764,16 @@ export function Inventory() {
                           </button>
                         </div>
                       </div>
-                      <span className="text-[10px] font-mono text-slate-400">#{comp.id}</span>
+                      <div className="flex items-center gap-2">
+                        {comp.price != null && Number(comp.price) > 0 ? (
+                          <span className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400" title={`Unit price: ${Number(comp.price).toFixed(4)} €`}>
+                            {Number(comp.price).toFixed(2)} €
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 italic">No price</span>
+                        )}
+                        <span className="text-[10px] font-mono text-slate-400">#{comp.id}</span>
+                      </div>
                     </div>
                   </div>
                 </Link>
@@ -913,6 +930,14 @@ export function Inventory() {
           </div>
         </div>
       )}
+
+      {/* Batch Auto Pricing Modal */}
+      <BatchAutoPricingModal
+        isOpen={isPricingModalOpen}
+        onClose={() => setIsPricingModalOpen(false)}
+        onSuccess={fetchComponents}
+        initialComponents={components}
+      />
     </motion.main>
   );
 }

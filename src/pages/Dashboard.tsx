@@ -14,11 +14,15 @@ import {
   BellRing,
   AlertCircle,
   Loader2,
+  Coins,
+  Sparkles,
+  DollarSign
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { directus, Component, ComponentType, Box } from "../lib/directus";
 import { readItems } from "@directus/sdk";
+import { BatchAutoPricingModal } from "../components/BatchAutoPricingModal";
 
 export function Dashboard() {
   const [loading, setLoading] = useState(true);
@@ -28,66 +32,90 @@ export function Dashboard() {
     totalBoxes: 0,
     criticalStock: 0,
     criticalThreshold: 10,
+    totalStockValue: 0,
+    pricedSkus: 0,
+    unpricedSkus: 0,
+    pricedPercentage: 0,
   });
   const [recentComponents, setRecentComponents] = useState<Component[]>([]);
   const [allItems, setAllItems] = useState<Component[]>([]);
   const [categoryStats, setCategoryStats] = useState<{ name: string; count: number; percentage: number; color: string }[]>([]);
   const [lowStockComponents, setLowStockComponents] = useState<Component[]>([]);
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
 
-  useEffect(() => {
-    async function fetchData() {
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch settings for critical threshold
+      let criticalThreshold = 10;
       try {
-        setLoading(true);
-
-        // Fetch settings for critical threshold
-        let criticalThreshold = 10;
-        try {
-          const settingsRes = await fetch("/api/settings");
-          if (settingsRes.ok) {
-            const settingsData = await settingsRes.json();
-            if (settingsData.criticalStockThreshold !== undefined) {
-              criticalThreshold = settingsData.criticalStockThreshold;
-            }
+        const settingsRes = await fetch("/api/settings");
+        if (settingsRes.ok) {
+          const settingsData = await settingsRes.json();
+          if (settingsData.criticalStockThreshold !== undefined) {
+            criticalThreshold = settingsData.criticalStockThreshold;
           }
-        } catch (e) {
-          console.error("Failed to fetch settings", e);
         }
+      } catch (e) {
+        console.error("Failed to fetch settings", e);
+      }
 
-        // Fetch all necessary data
-        // We use Promise.all to fetch in parallel
-        const [components, types, boxes] = await Promise.all([
-          directus.request(readItems('components', {
-            fields: ['*', 'type.*', 'package.*'] as any,
-            limit: -1, // Fetch all for metrics
-            sort: ['-id'], // Get newest first for recent activity
-          })) as unknown as Promise<Component[]>,
-          directus.request(readItems('components_types', {
-            limit: -1,
-          })),
-          directus.request(readItems('boxes', {
-            limit: -1,
-            fields: ['id']
-          })),
-        ]);
+      // Fetch all necessary data
+      // We use Promise.all to fetch in parallel
+      const [components, types, boxes] = await Promise.all([
+        directus.request(readItems('components', {
+          fields: ['*', 'type.*', 'package.*'] as any,
+          limit: -1, // Fetch all for metrics
+          sort: ['-id'], // Get newest first for recent activity
+        })) as unknown as Promise<Component[]>,
+        directus.request(readItems('components_types', {
+          limit: -1,
+        })),
+        directus.request(readItems('boxes', {
+          limit: -1,
+          fields: ['id']
+        })),
+      ]);
 
-        // Store all items for export
-        setAllItems(components as Component[]);
+      // Store all items for export
+      setAllItems(components as Component[]);
 
-        // Calculate Metrics
-        const totalSkus = components.length;
-        const totalUnits = components.reduce((sum, item) => sum + (item.quantity_available || 0), 0);
-        const totalBoxes = boxes.length;
-        
-        const lowStock = components.filter(c => (c.quantity_available || 0) <= criticalThreshold);
-        const criticalStock = lowStock.length;
+      // Calculate Metrics
+      const totalSkus = components.length;
+      const totalUnits = components.reduce((sum, item) => sum + (item.quantity_available || 0), 0);
+      const totalBoxes = boxes.length;
+      
+      const lowStock = components.filter(c => (c.quantity_available || 0) <= criticalThreshold);
+      const criticalStock = lowStock.length;
 
-        setMetrics({
-          totalSkus,
-          totalUnits,
-          totalBoxes: parseInt(totalBoxes as any),
-          criticalStock,
-          criticalThreshold,
-        });
+      // Calculate Stock Valuation Metrics
+      let totalStockValue = 0;
+      let pricedSkus = 0;
+
+      components.forEach((c) => {
+        const unitPrice = Number(c.price);
+        const qty = Number(c.quantity_available) || 0;
+        if (c.price !== null && c.price !== undefined && !isNaN(unitPrice) && unitPrice > 0) {
+          pricedSkus++;
+          totalStockValue += unitPrice * qty;
+        }
+      });
+
+      const unpricedSkus = totalSkus - pricedSkus;
+      const pricedPercentage = totalSkus > 0 ? Math.round((pricedSkus / totalSkus) * 100) : 0;
+
+      setMetrics({
+        totalSkus,
+        totalUnits,
+        totalBoxes: parseInt(totalBoxes as any),
+        criticalStock,
+        criticalThreshold,
+        totalStockValue,
+        pricedSkus,
+        unpricedSkus,
+        pricedPercentage,
+      });
 
         // Recent Activity (first 5 from the sorted list)
         setRecentComponents(components.slice(0, 5));
@@ -120,26 +148,31 @@ export function Dashboard() {
       } finally {
         setLoading(false);
       }
-    }
+    };
 
-    fetchData();
-  }, []);
+    useEffect(() => {
+      fetchData();
+    }, []);
 
   const handleExport = () => {
     if (allItems.length === 0) return;
 
-    const headers = ['ID', 'Name', 'Category', 'Quantity', 'Location', 'Description'];
+    const headers = ['ID', 'Name', 'Category', 'Quantity', 'Unit Price (€)', 'Total Value (€)', 'Location', 'Description'];
     const csvContent = [
       headers.join(','),
       ...allItems.map(comp => {
         const categoryName = typeof comp.type === 'object' && comp.type ? comp.type.name : '';
         const locationName = typeof comp.location === 'object' && comp.location ? comp.location.name : '';
-        
+        const unitPrice = comp.price !== null && comp.price !== undefined ? Number(comp.price) : 0;
+        const totalVal = unitPrice * (Number(comp.quantity_available) || 0);
+
         return [
           comp.id,
           `"${comp.name.replace(/"/g, '""')}"`,
           `"${categoryName.replace(/"/g, '""')}"`,
           comp.quantity_available,
+          unitPrice > 0 ? unitPrice.toFixed(4) : "",
+          totalVal > 0 ? totalVal.toFixed(2) : "",
           `"${locationName.replace(/"/g, '""')}"`,
           `"${(comp.description || '').replace(/"/g, '""')}"`
         ].join(',');
@@ -177,16 +210,31 @@ export function Dashboard() {
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-black tracking-tight">Inventory Overview</h1>
           <p className="text-slate-500 dark:text-slate-400">
-            Real-time tracking of component stock levels and distribution.
+            Real-time tracking of component stock levels, valuation, and distribution.
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setIsPricingModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
+            title="Automatically estimate and set prices for unpriced components"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Auto-Price Stock</span>
+            {metrics.unpricedSkus > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-black/20 font-bold">
+                {metrics.unpricedSkus}
+              </span>
+            )}
+          </button>
+
           <button 
             onClick={handleExport}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
           >
-            <Download className="w-5 h-5" /> Export
+            <Download className="w-4 h-4" /> Export CSV
           </button>
+
           <Link to="/inventory/add" className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white font-semibold text-sm hover:brightness-110 transition-all shadow-lg shadow-primary/20">
             <Plus className="w-5 h-5" /> New Component
           </Link>
@@ -194,56 +242,79 @@ export function Dashboard() {
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5 mb-8">
+        {/* Total Stock Valuation Card */}
+        <div className="flex flex-col justify-between rounded-xl p-5 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent dark:from-emerald-950/40 dark:via-slate-900 border border-emerald-500/30 dark:border-emerald-500/20 shadow-sm relative overflow-hidden">
+          <div>
+            <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400 mb-2">
+              <p className="text-xs font-bold uppercase tracking-wider">Total Stock Value</p>
+              <div className="size-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                <Coins className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <p className="text-2xl sm:text-3xl font-black font-mono text-emerald-600 dark:text-emerald-400 truncate">
+                {metrics.totalStockValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 pt-2 border-t border-emerald-500/20 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="truncate">
+              {metrics.pricedSkus} / {metrics.totalSkus} priced ({metrics.pricedPercentage}%)
+            </span>
+            {metrics.unpricedSkus > 0 && (
+              <button
+                onClick={() => setIsPricingModalOpen(true)}
+                className="text-primary hover:underline font-bold flex items-center gap-1 cursor-pointer shrink-0 ml-1"
+                title="Price unpriced components"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>+ {metrics.unpricedSkus}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-xl p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <p className="text-sm font-semibold uppercase tracking-wider">Total SKUs</p>
+            <p className="text-xs font-semibold uppercase tracking-wider">Total SKUs</p>
             <Layers className="w-5 h-5 text-primary" />
           </div>
           <div className="flex items-baseline gap-2">
-            <p className="text-3xl font-bold">{metrics.totalSkus.toLocaleString()}</p>
-            {/* <p className="text-emerald-500 text-sm font-medium flex items-center">
-              <TrendingUp className="w-4 h-4 mr-1" /> 2.4%
-            </p> */}
+            <p className="text-2xl sm:text-3xl font-bold">{metrics.totalSkus.toLocaleString()}</p>
           </div>
           <p className="text-xs text-slate-400">Unique components</p>
         </div>
 
-        <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col gap-2 rounded-xl p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <p className="text-sm font-semibold uppercase tracking-wider">Total Units</p>
+            <p className="text-xs font-semibold uppercase tracking-wider">Total Units</p>
             <Package className="w-5 h-5 text-primary" />
           </div>
           <div className="flex items-baseline gap-2">
-            <p className="text-3xl font-bold">{metrics.totalUnits.toLocaleString()}</p>
-            {/* <p className="text-emerald-500 text-sm font-medium flex items-center">
-              <TrendingUp className="w-4 h-4 mr-1" /> 0.5%
-            </p> */}
+            <p className="text-2xl sm:text-3xl font-bold">{metrics.totalUnits.toLocaleString()}</p>
           </div>
           <p className="text-xs text-slate-400">Active stock</p>
         </div>
 
-        <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col gap-2 rounded-xl p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-            <p className="text-sm font-semibold uppercase tracking-wider">Total Boxes</p>
+            <p className="text-xs font-semibold uppercase tracking-wider">Total Boxes</p>
             <Warehouse className="w-5 h-5 text-primary" />
           </div>
           <div className="flex items-baseline gap-2">
-            <p className="text-3xl font-bold">{metrics.totalBoxes}</p>
+            <p className="text-2xl sm:text-3xl font-bold">{metrics.totalBoxes}</p>
           </div>
           <p className="text-xs text-slate-400">Storage containers</p>
         </div>
 
-        <div className="flex flex-col gap-2 rounded-xl p-6 bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/50 shadow-sm">
+        <div className="flex flex-col gap-2 rounded-xl p-5 bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/50 shadow-sm">
           <div className="flex items-center justify-between text-orange-600 dark:text-orange-400">
-            <p className="text-sm font-semibold uppercase tracking-wider font-bold">Critical Stock</p>
+            <p className="text-xs font-semibold uppercase tracking-wider font-bold">Critical Stock</p>
             <AlertTriangle className="w-5 h-5" />
           </div>
           <div className="flex items-baseline gap-2">
-            <p className="text-3xl font-bold text-orange-600 dark:text-orange-400">{metrics.criticalStock}</p>
-            {/* <p className="text-red-500 text-sm font-medium flex items-center">
-              <ArrowUp className="w-4 h-4 mr-1" /> 4
-            </p> */}
+            <p className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">{metrics.criticalStock}</p>
           </div>
           <p className="text-xs text-orange-600/60 dark:text-orange-400/60">Items with &le; {metrics.criticalThreshold} units</p>
         </div>
@@ -379,6 +450,15 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      <BatchAutoPricingModal
+        isOpen={isPricingModalOpen}
+        onClose={() => setIsPricingModalOpen(false)}
+        onSuccess={() => {
+          fetchData();
+        }}
+        initialComponents={allItems}
+      />
     </motion.main>
   );
 }
